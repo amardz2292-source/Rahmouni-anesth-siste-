@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#06111c">
+<title>Rahmouni anesthésiste – Calculateur de doses</title>
+<style>
+:root{--bg:#06111c;--panel:#0c1d2e;--line:#1b3a57;--txt:#e8f1f8;--mute:#8fa8bd;--cy:#31d0ff;--ok:#35e07a;--warn:#ffb020;--bad:#ff4d4d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:12px;max-width:760px;margin:auto}
+h1{font-size:22px;margin:4px 0 2px}
+h1 span{color:var(--cy)}
+.sub{color:var(--mute);font-size:13px;margin-bottom:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;font-size:13px;color:var(--mute);margin-bottom:3px}
+input,select{width:100%;padding:11px;font-size:17px;color:var(--txt);background:#08182a;border:1px solid var(--line);border-radius:8px}
+input:focus,select:focus{outline:2px solid var(--cy)}
+.chk{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:15px}
+.chk input{width:22px;height:22px}
+.alert{border-radius:8px;padding:9px 11px;margin-top:10px;font-size:14px;border:1px solid}
+.alert.w{border-color:var(--warn);color:var(--warn)}
+.alert.b{border-color:var(--bad);color:var(--bad)}
+h2{font-size:16px;margin:0 0 8px;color:var(--cy)}
+.drug{border-left:4px solid var(--c);background:#08182a;border-radius:8px;padding:9px 11px;margin-bottom:8px}
+.drug h3{margin:0 0 4px;font-size:16px;color:var(--c)}
+.row{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:3px 0;border-top:1px solid #12293f}
+.row:first-of-type{border-top:0}
+.row .l{color:var(--mute)}
+.row .v{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.vent{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cell{background:#08182a;border-radius:8px;padding:9px 11px}
+.cell .k{font-size:12px;color:var(--mute)}
+.cell .n{font-size:20px;font-weight:700;color:var(--ok)}
+.cell .r{font-size:12px;color:var(--mute)}
+.foot{font-size:12px;color:var(--mute);text-align:center;padding:8px 4px 24px}
+.foot b{color:var(--warn)}
+</style>
+</head>
+<body>
+<h1>Rahmouni <span>anesthésiste</span></h1>
+<div class="sub">Calculateur de doses · Anesthésie-Réanimation</div>
+
+<div class="panel">
+  <div class="grid">
+    <div><label for="w">Poids (kg)</label><input id="w" type="number" inputmode="decimal" min="0" step="0.1" value="70"></div>
+    <div><label for="h">Taille (cm)</label><input id="h" type="number" inputmode="decimal" min="0" value="175"></div>
+    <div><label for="s">Sexe</label><select id="s"><option value="M">Homme</option><option value="F">Femme</option></select></div>
+    <div><label for="m">Patient</label><select id="m"><option value="A">Adulte</option><option value="E">Enfant</option></select></div>
+  </div>
+  <label class="chk"><input id="f" type="checkbox"> Patient âgé, fragile ou instable (doses d'induction ÷ 2)</label>
+  <div id="alerts"></div>
+</div>
+
+<div class="panel"><h2>Ventilation</h2><div class="vent" id="vent"></div></div>
+<div class="panel"><h2>Médicaments</h2><div id="drugs"></div></div>
+
+<div class="foot"><b>Aide au calcul uniquement.</b> La décision et la vérification des doses restent sous la responsabilité du médecin anesthésiste. Propofol 1 % = 10 mg/mL · Fentanyl 50 µg/mL.</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function fmt(n){return n<10?String(+n.toFixed(1)).replace('.',','):String(Math.round(n))}
+function rng(a,b,u){return fmt(a)+' – '+fmt(b)+' '+u}
+
+// type: 'mg' = mg/kg → mg ; 'ug' = µg/kg → µg ; 'mgh' = mg/kg/h → mg/h ; 'ugh' = µg/kg/h → µg/h ; 'prop' = µg/kg/min → mL/h (1 %)
+const DRUGS=[
+ {n:'Propofol',c:'#4da3ff',rows:[
+  {l:'Induction (1,5–2,5 mg/kg)',a:1.5,b:2.5,t:'mg',red:1},
+  {l:'Perfusion (50–150 µg/kg/min)',a:50,b:150,t:'prop'}]},
+ {n:'Étomidate',c:'#35e07a',rows:[
+  {l:'Induction (0,2–0,3 mg/kg)',a:0.2,b:0.3,t:'mg',red:1}]},
+ {n:'Kétamine',c:'#b57bff',rows:[
+  {l:'Induction (1–2 mg/kg)',a:1,b:2,t:'mg',red:1},
+  {l:'Analgésie (0,25–0,5 mg/kg)',a:0.25,b:0.5,t:'mg'},
+  {l:'Perfusion (0,5–1 mg/kg/h)',a:0.5,b:1,t:'mgh'}]},
+ {n:'Thiopental',c:'#2fd6c6',rows:[
+  {l:'Induction (3–5 mg/kg)',a:3,b:5,t:'mg',red:1}]},
+ {n:'Fentanyl',c:'#ff8a3d',rows:[
+  {l:'Dose (1–3 µg/kg)',a:1,b:3,t:'ug'},
+  {l:'Perfusion (1–3 µg/kg/h)',a:1,b:3,t:'ugh'}]},
+ {n:'Rocuronium',c:'#6fc3ff',rows:[
+  {l:'Intubation (0,6–1,2 mg/kg)',a:0.6,b:1.2,t:'mg'},
+  {l:'Entretien (0,1–0,2 mg/kg)',a:0.1,b:0.2,t:'mg'}]},
+ {n:'Atracurium',c:'#c28bff',rows:[
+  {l:'Intubation (0,5–0,6 mg/kg)',a:0.5,b:0.6,t:'mg'},
+  {l:'Entretien (0,1 mg/kg / 15–20 min)',a:0.1,b:0.1,t:'mg'}]},
+ {n:'Succinylcholine',c:'#ff6b81',rows:[
+  {l:'Intubation (1–1,5 mg/kg)',a:1,b:1.5,t:'mg'}]}
+];
+
+function calc(w,fr,t,red){
+  const k=red&&fr?0.5:1;
+  switch(t){
+    case 'mg': return rng(w*fr[0]*k,w*fr[1]*k,'mg');
+    default:return '';
+  }
+}
+
+function render(){
+  const w=parseFloat($('w').value), h=parseFloat($('h').value);
+  const sex=$('s').value, kid=$('m').value==='E', frag=$('f').checked;
+  const al=[]; 
+  if(!(w>0)){ $('alerts').innerHTML='<div class="alert b">Saisir le poids du patient.</div>'; $('vent').innerHTML='';$('drugs').innerHTML='';return; }
+  if(w<3||w>200) al.push(['b','Poids hors limites (3–200 kg) : vérifier la saisie.']);
+  if(kid) al.push(['w','Mode enfant : doses indicatives, vérifier les protocoles pédiatriques (nouveau-né et nourrisson : doses différentes).']);
+  if(frag) al.push(['w','Doses d\'induction divisées par 2 ; titrer selon l\'effet.']);
+
+  // Ventilation
+  let ref=w, refLbl='poids réel';
+  if(!kid){
+    if(h>=100&&h<=230){ ref=(sex==='M'?50:45.5)+0.91*(h-152.4); refLbl='poids idéal'; }
+    else al.push(['w','Taille manquante ou invalide : VT calculé sur le poids réel.']);
+  }
+  const vtMin=ref*6, vtMax=ref*8;
+  const cells=[
+    ['Poids de référence',fmt(ref)+' kg','('+refLbl+')'],
+    ['VT (6–8 mL/kg)',Math.round(vtMin)+' – '+Math.round(vtMax)+' mL','VT visé : '+Math.round(ref*7)+' mL'],
+    ['PEEP','5 – 8 cmH₂O',''],
+    ['I/E','1:2','plage 1:1,5 à 1:3'],
+    ['FR',kid?'15 – 25 /min':'10 – 14 /min','ajuster selon EtCO₂ 35–45 mmHg'],
+    ['FiO₂','40 – 100 %','selon SpO₂ (> 94 %)']
+  ];
+  $('vent').innerHTML=cells.map(c=>`<div class="cell"><div class="k">${c[0]}</div><div class="n">${c[1]}</div><div class="r">${c[2]}</div></div>`).join('');
+
+  // Médicaments
+  $('drugs').innerHTML=DRUGS.map(d=>{
+    const rows=d.rows.map(r=>{
+      const k=(r.red&&frag)?0.5:1; let v;
+      if(r.t==='mg') v=rng(w*r.a*k,w*r.b*k,'mg');
+      else if(r.t==='ug') v=rng(w*r.a,w*r.b,'µg')+' ('+rng(w*r.a/50,w*r.b/50,'mL')+')';
+      else if(r.t==='mgh') v=rng(w*r.a,w*r.b,'mg/h');
+      else if(r.t==='ugh') v=rng(w*r.a,w*r.b,'µg/h');
+      else if(r.t==='prop') v=rng(w*r.a*60/10000,w*r.b*60/10000,'mL/h');
+      return `<div class="row"><span class="l">${r.l}</span><span class="v">${v}</span></div>`;
+    }).join('');
+    return `<div class="drug" style="--c:${d.c}"><h3>${d.n}</h3>${rows}</div>`;
+  }).join('');
+
+  $('alerts').innerHTML=al.map(a=>`<div class="alert ${a[0]}">${a[1]}</div>`).join('');
+}
+['w','h','s','m','f'].forEach(id=>$(id).addEventListener('input',render));
+render();
+</script>
+</body>
+</html>
